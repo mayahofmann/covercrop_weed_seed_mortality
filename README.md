@@ -5,6 +5,7 @@ ccc_seed_mortality_22_23.csv: data file for year 1 of experiment 1 (2022-2023)
 ccc_seed_mortality_23_24.csv: data file for year 2 of experiment 1 (2023-2024)
 compfunc_winter_y2_plot.csv: data file for experiment 2 (2024-2025)
 metadata_csvfiles.xlsx: has column name and description for the following files - ccc_seed_mortality_22_23.csv, ccc_seed_mortality_23_24.csv, compfunc_winter_y2_plot.csv
+
 metadata.tsv: metadata used in QIIME scripts (found in 16s and its folders)
 weedseedmortALLCODE.Rmd: R markdown file with entire R script used to perform statistical analyses and make figures for cover crop treatments, total/relative biomass, edaphic factors, and microbial (16s/ITS) data and weed seed mortality 
 
