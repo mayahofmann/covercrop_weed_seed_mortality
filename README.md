@@ -11,8 +11,8 @@ metadata_csvfiles.xlsx: has column name and description for the following files 
 
 metadata.tsv: metadata used in QIIME scripts (found in 16s and its folders)
 
-weedseedmortALLCODE.Rmd: R markdown file with entire R script used to perform statistical analyses and make figures for cover crop treatments, total/relative biomass, edaphic factors, and microbial (16s/ITS) data and weed seed mortality 
+weedseedmortALLCODE.Rmd: R markdown file with entire R script used to perform all statistical analyses and create figures 
 
 WITHIN THE 16s and ITS folders:
-- each has a taxonomy.tsv, feature-table.tsv, rep-seqs.fasta, and sample_metadata.txt used to create the phyloseq object in the R code, and also included in the folder (phyloseq.rds). These files were generated using the QIIME script also found in each respective folder, which uses the manifest.txt file found in each folder to access the raw sequencing data. Raw sequencing data is in the process of being uploaded to NCBI. 
+- a taxonomy.tsv, feature-table.tsv, rep-seqs.fasta, and sample_metadata.txt used to create the phyloseq object in the R code, which is also included in the folder (phyloseq.rds). These files were generated using the QIIME script also found in each respective folder, which uses the manifest.txt file found in each folder to access the raw sequencing data. Raw sequencing data is in the process of being uploaded to NCBI. 
 
