@@ -1,0 +1,2091 @@
+---
+title: "weedseedmort"
+author: "maya hofmann"
+date: "2026-06-18"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#load libraries 
+library(rcartocolor)
+library(tidyverse)
+library(ggpubr)
+library(DImodels)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(nlme)
+library(car)
+library(performance)
+library(multcomp)
+library(multcompView)
+library(ggeffects)
+library(emmeans)
+library(MuMIn)
+library(FSA)
+library(glmmTMB)
+library(DHARMa)
+library(modelsummary)
+library(Ternary)
+library(vegan)
+#setwd("/Users/mayahofmann/Desktop/data_files_seed_mort)
+```
+
+Import the data: year 1 CCC (2022-2023), year 2 CCC (2023-2024), COMPFUNC
+```{r}
+seed_mort_y1 <- read.csv("/Users/mayahofmann/Desktop/data_files_seed_mort/ccc_seed_mortality_22_23.csv")
+seed_mort_y2 <- read.csv("/Users/mayahofmann/Desktop/data_files_seed_mort/ccc_seed_mortality_23_24.csv")
+winter_year2_plot <- read.csv("/Users/mayahofmann/Desktop/data_files_seed_mort/compfunc_winter_y2_plot.csv") #this is already grouped by plot since we did not have two subsamples (only one bag buried per plot)
+```
+
+Add necessary data columns and change necessary data to factors 
+```{r}
+#change to factors
+#year `1
+seed_mort_y1$block = as.factor(seed_mort_y1$block)
+seed_mort_y1$time_yr = as.factor(seed_mort_y1$time_yr)
+seed_mort_y1$season = as.factor(seed_mort_y1$season)
+seed_mort_y1$trt = as.factor(seed_mort_y1$trt)
+seed_mort_y1$subsample = as.factor(seed_mort_y1$subsample)
+#year 2
+seed_mort_y2$block = as.factor(seed_mort_y2$block)
+seed_mort_y2$time_yr = as.factor(seed_mort_y2$time_yr)
+seed_mort_y2$season = as.factor(seed_mort_y2$season)
+seed_mort_y2$trt = as.factor(seed_mort_y2$trt)
+seed_mort_y2$subsample = as.factor(seed_mort_y2$subsample)
+
+#add proportion of total biomass for each species 
+#year 1
+seed_mort_y1$p_tri <- seed_mort_y1$trit_biomass_g / seed_mort_y1$cc_shoot_biomass_g
+seed_mort_y1$p_clov <- seed_mort_y1$clov_biomass_g / seed_mort_y1$cc_shoot_biomass_g
+seed_mort_y1$p_pea <- seed_mort_y1$pea_biomass_g / seed_mort_y1$cc_shoot_biomass_g
+seed_mort_y1$p_can <- seed_mort_y1$can_biomass_g / seed_mort_y1$cc_shoot_biomass_g
+#year 2
+seed_mort_y2$p_tri <- seed_mort_y2$trit_biomass_g / seed_mort_y2$cc_shoot_biomass_g
+seed_mort_y2$p_clov <- seed_mort_y2$clov_biomass_g / seed_mort_y2$cc_shoot_biomass_g
+seed_mort_y2$p_pea <- seed_mort_y2$pea_biomass_g / seed_mort_y2$cc_shoot_biomass_g
+seed_mort_y2$p_can <- seed_mort_y2$can_biomass_g / seed_mort_y2$cc_shoot_biomass_g
+
+#compfunc 
+winter_year2_plot <- subset(winter_year2_plot,!is.na(weed_seed_mortality))
+winter_year2_plot$plot <- as.factor(winter_year2_plot$plot)
+winter_year2_plot$block <- as.factor(winter_year2_plot$block)
+winter_year2_plot$num_spp <- as.factor(winter_year2_plot$num_spp)
+winter_year2_plot$canola_presence <- as.factor(winter_year2_plot$canola_presence)
+
+#add proportion in stand for each spp
+winter_year2_plot$p_tri_stand <- winter_year2_plot$tri_stand_m2 / (winter_year2_plot$tri_stand_m2 + winter_year2_plot$can_stand_m2 + winter_year2_plot$clov_stand_m2)
+winter_year2_plot$p_can_stand <- winter_year2_plot$can_stand_m2 / (winter_year2_plot$tri_stand_m2 + winter_year2_plot$can_stand_m2 + winter_year2_plot$clov_stand_m2)
+winter_year2_plot$p_clov_stand <- winter_year2_plot$clov_stand_m2 / (winter_year2_plot$tri_stand_m2 + winter_year2_plot$can_stand_m2 + winter_year2_plot$clov_stand_m2)
+
+```
+
+Average subsamples of the data 
+```{r}
+#year 1
+seed_mort_y1_plot <- seed_mort_y1 %>% 
+  dplyr::group_by(plot, trt, season, time_yr, block) %>% #everything besides subsample 
+  summarise(across(where(is.numeric), mean, na.rm = TRUE), #calculating mean of all numeric columns
+            amapo_mortality_se = se(amapo_mortality), #adding standard error columns for amapo and setfa mortality
+            setfa_mortality_se = se(setfa_mortality)) 
+
+#year 2
+seed_mort_y2_plot <- seed_mort_y2 %>% 
+  dplyr::group_by(plot, trt, season, time_yr, block) %>% #everything besides subsample 
+  summarise(across(where(is.numeric), mean, na.rm = TRUE), #calculating mean of all numeric columns
+            amapo_mortality_se = se(amapo_mortality), #adding standard error columns for amapo and setfa mortality
+            setfa_mortality_se = se(setfa_mortality)) 
+```
+
+Separate each year of data into respective seasons
+```{r}
+#year 1
+seed_mort_y1_f22 <- subset(seed_mort_y1_plot, season == "F22")
+seed_mort_y1_s23 <- subset(seed_mort_y1_plot, season == "S23")
+seed_mort_y1_f23 <- subset(seed_mort_y1_plot, season == "F23")
+#year 2
+seed_mort_y2_f23 <- subset(seed_mort_y2_plot, season == "F23")
+seed_mort_y2_s24 <- subset(seed_mort_y2_plot, season == "S24")
+seed_mort_y2_f24 <- subset(seed_mort_y2_plot, season == "F24")
+
+#add necessary variables to necessary data frames 
+#year one
+seed_mort_y1_f23$cc_shoot_biomass_g_s23 <- seed_mort_y1_s23$cc_shoot_biomass_g
+seed_mort_y1_f23$cc_root_biomass_g_s23 <- seed_mort_y1_s23$cc_root_g_total
+seed_mort_y1_f23$cc_root_0_20_g_s23 <- seed_mort_y1_s23$cc_root_0_20_g   
+seed_mort_y1_f23$cc_root_20_40_g_s23 <- seed_mort_y1_s23$cc_root_20_40_g
+seed_mort_y1_f23$p_pea = seed_mort_y1_s23$p_pea
+seed_mort_y1_f23$p_clov = seed_mort_y1_s23$p_clov
+seed_mort_y1_f23$p_can = seed_mort_y1_s23$p_can
+seed_mort_y1_f23$p_tri = seed_mort_y1_s23$p_tri
+#year two 
+seed_mort_y2_f24$p_pea = seed_mort_y2_s24$p_pea
+seed_mort_y2_f24$p_clov = seed_mort_y2_s24$p_clov
+seed_mort_y2_f24$p_can = seed_mort_y2_s24$p_can
+seed_mort_y2_f24$p_tri = seed_mort_y2_s24$p_tri
+seed_mort_y2_f24$cc_biomass_spring <- seed_mort_y2_s24$cc_shoot_biomass_g_m2
+```
+
+Make spring data from both yeras into a dataframe 
+```{r}
+seed_mort_spring <- bind_rows(seed_mort_y1_s23, seed_mort_y2_s24)
+```
+
+Plots of mortality by treatment for each season
+```{r pressure, echo=FALSE}
+#year one spring amapo
+amapos23_plot <- ggplot(seed_mort_y1_s23, aes(x=trt, y=(amapo_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="A.powellii Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year one spring setfa
+setfas23_plot <- ggplot(seed_mort_y1_s23, aes(x=trt, y=(setfa_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="S. faberi Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year one fall amapo
+amapof23_plot <- ggplot(seed_mort_y1_f23, aes(x=trt, y=(amapo_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="A.powellii Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year one fall setfa 
+setfaf23_plot <- ggplot(seed_mort_y1_f23, aes(x=trt, y=(setfa_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="S. faberi Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year 2 spring amapo 
+amapos24_plot<-ggplot(seed_mort_y2_s24, aes(x=trt, y=(amapo_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  ylim(0,1) +
+  labs(x="", y="A.powellii Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year two spring setfa
+setfas24_plot<-ggplot(seed_mort_y2_s24, aes(x=trt, y=(setfa_mortality), fill=trt))+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="S. faberi Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year 2 fall amapo
+amapof24_plot<-ggplot(seed_mort_y2_f24, aes(x=trt, y=(amapo_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="A.powellii Mortality")+
+ scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+#year 2 fall setfa
+setfaf24_plot<-ggplot(seed_mort_y2_f24, aes(x=trt, y=(setfa_mortality), fill=trt))+
+  geom_boxplot(color="black", show.legend = FALSE)+
+  scale_x_discrete(limits = c("Fallow", "Pea", "Clover", "Canola", "Triticale", "3sppN", "4spp"))+
+  ylim(0,1)+
+  stat_summary(fun=mean, geom = "point", shape=18, size=2.5, show.legend = FALSE)+
+  labs(x="", y="S. faberi Mortality")+
+  scale_fill_carto_d(palette = "Vivid") +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=20, angle = 45, vjust = 1, hjust = 1), axis.title.x = element_text(size=24),
+        axis.text.y=element_text(size=20), axis.title.y=element_text(size=24), title = element_text(size=24))
+
+ggsave("amapo_s23.png", plot = amapos23_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("amapo_s24.png", plot = amapos24_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("amapo_f23.png", plot = amapof23_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("amapo_f24.png", plot = amapof24_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+
+ggsave("setfa_s23.png", plot = setfas23_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("setfa_s24.png", plot = setfas24_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("setfa_f23.png", plot = setfaf23_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+ggsave("setfa_f24.png", plot = setfaf24_plot, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",)
+```
+Ternary plot for weed seed mortality across cover crop mixture stands
+```{r}
+winter_year2_plot_nf <- winter_year2_plot[winter_year2_plot$treatment!=17,] #takes out fallow data
+a <- winter_year2_plot_nf$p_tri_stand
+b <- winter_year2_plot_nf$p_can_stand
+c <- winter_year2_plot_nf$p_clov_stand
+abc <- rbind(a, b, c)
+weed_seed_mort <- winter_year2_plot_nf$weed_seed_mortality
+par(mar = rep(0.2, 4))
+TernaryPlot(alab = "triticale % in stand", blab = "canola % in stand", clab = "clover % in stand")
+xy <- TernaryToXY(abc)
+Predict <- function(predXY) {
+  Distance <- function(a, b) {
+    apply(a, 2, function(pt) sqrt(colSums((pt - b) ^ 2)))
+  }
+  dists <- Distance(xy, predXY)
+  id <- 1 / dists
+  idw <- id / rowSums(id)
+  
+  # Return:
+  colSums(weed_seed_mort * t(idw))
+}
+
+#predict at triangle centres
+tri <- TriangleCentres(resolution = 10L) #can adjust resolution
+
+# Now we interpolate between our known values to generate a colour for each
+# of our tiles
+predicted <- Predict(tri[1:2, ])
+map <- rbind(x = tri["x", ], y = tri["y", ], z = predicted,
+             down = tri["triDown", ])
+
+# Place a semitransparent colour fill over grid lines:
+ColourTernary(map)
+PlotTools::SpectrumLegend(
+  "topright",
+  cex = 0.8, # Font size
+  palette = hcl.colors(265, palette = "viridis", alpha = 0.6),
+  legend = paste(
+    seq(from = max(winter_year2_plot_nf$weed_seed_mortality), to = min(winter_year2_plot_nf$weed_seed_mortality),
+        length.out = 5)
+  ),
+  bty = "n", # No framing box
+  xpd = NA, # Don't clip at margins
+  title = "S. faberi seed mortality"
+)
+TernaryPoints(abc, col = 'black', pch = 16, cex = 1)
+```
+
+Models including treatment and cover crop biomass / proportion of biomass
+```{r}
+#year one spring: DOES TREATMENT AFFECT SEED MORTALITY?
+amapo_s23_trt <- glmmTMB(amapo_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_trt, type = "III")
+#no significance
+
+setfa_s23_trt <- glmmTMB(setfa_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_trt, type = "III")
+#treatment significant 
+
+setfa_s23_emmeans <- emmeans(setfa_s23_trt, ~ trt, type="response")
+pairs(setfa_s23_emmeans, adjust="Tukey") #Canola and Fallow significantly different
+setfa_s23_cld <- cld(setfa_s23_emmeans, alpha=0.05, adjust="Tukey", Letter=letters) #canola a, fallow b, everything else ab
+#tukey changed to sidak
+
+setfa_s23_cld #canola and fallow significantly different 
+
+#year one fall
+amapo_f23_trt <- glmmTMB(amapo_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_trt, type = "III")
+
+setfa_f23_trt <- glmmTMB(setfa_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_trt, type = "III")
+#treatment significant
+setfa_f23_emmeans <- emmeans(setfa_f23_trt, ~ trt, type="response")
+pairs(setfa_f23_emmeans, adjust="Tukey") #Canola and Clover significantly different
+setfa_f23_cld <- cld(setfa_f23_emmeans, alpha=0.05, adjust="Tukey", Letter=letters) #canola = a, clover = b, everything else ab
+setfa_f23_cld #canola and clover significantly different 
+
+#year two spring: DOES TREATMENT AFFECT SEED MORTALITY?
+amapo_s24_trt <- glmmTMB(amapo_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_trt, type = "III")
+#not significant
+setfa_s24_trt <- glmmTMB(setfa_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_trt, type = "III")
+#not significant 
+
+#year two fall: DOES TREATMENT AFFECT SEED MORTALITY?
+amapo_f24_trt <- glmmTMB(amapo_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_trt, type = "III")
+
+setfa_f24_trt <- glmmTMB(setfa_mortality ~ trt + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_trt, type = "III")
+
+```
+
+Model of spring mortality by year * treatment 
+```{r}
+amapo_year_m <- glmmTMB(amapo_mortality ~ trt*season + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_spring)
+glmmTMB:::Anova.glmmTMB(amapo_year_m, type = "III")
+#not significant 
+setfa_year_m <- glmmTMB(setfa_mortality ~ trt*season + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_spring)
+glmmTMB:::Anova.glmmTMB(setfa_year_m, type = "III")
+#interaction significant
+setfa_sp_emmeans <- emmeans(setfa_year_m, ~ trt*season, type="response")
+pairs(setfa_sp_emmeans, adjust="Tukey")
+setfa_sp_cld <- cld(setfa_sp_emmeans, alpha=0.05, adjust="Tukey", Letter=letters) 
+setfa_sp_cld 
+```
+
+Models of mortality by season for each year 
+```{r}
+#taking out baseline data
+seed_mort_y1_plot.n <- subset(seed_mort_y1_plot, time_yr != 0)
+seed_mort_y2_plot.n <- subset(seed_mort_y2_plot, time_yr != 0)
+
+#models year 1
+amapo_myr <- glmmTMB(amapo_mortality ~ trt*time_yr + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_plot.n)
+glmmTMB:::Anova.glmmTMB(amapo_myr, type = "III")
+amapo_myr_emmeans <- emmeans(amapo_myr, ~ time_yr, type="response")
+pairs(amapo_myr_emmeans, adjust="Tukey")
+amapo_myr_cld <- cld(amapo_myr_emmeans, alpha=0.05, adjust="Tukey", Letter=letters)
+amapo_myr_cld
+
+setfa_myr <- glmmTMB(setfa_mortality ~ trt*time_yr + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_plot.n)
+glmmTMB:::Anova.glmmTMB(setfa_myr, type = "III")
+setfa_myr_emmeans <- emmeans(setfa_myr, ~ time_yr, type="response")
+pairs(setfa_myr_emmeans, adjust="Tukey")
+setfa_myr_cld <- cld(setfa_myr_emmeans, alpha=0.05, adjust="Tukey", Letter=letters)
+setfa_myr_cld
+
+#models year 2
+amapo_mszn <- glmmTMB(amapo_mortality ~ trt*season + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_plot.n)
+glmmTMB:::Anova.glmmTMB(amapo_mszn, type = "III")
+
+setfa_mszn <- glmmTMB(setfa_mortality ~ trt*season + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_plot.n)
+glmmTMB:::Anova.glmmTMB(setfa_mszn, type = "III")
+setfa_mszn_emmeans <- emmeans(setfa_mszn, ~ season, type="response")
+pairs(setfa_mszn_emmeans, adjust="Tukey")
+setfa_mszn_cld <- cld(setfa_mszn_emmeans, alpha=0.05, adjust="Tukey", Letter=letters) 
+setfa_mszn_cld #less mortality in fall than spring... interesting 
+```
+
+Models of seed mortality vs. total cover crop biomass 
+```{r}
+#spring year 1
+amapo_s23_mbiomass <- glmmTMB(amapo_mortality ~ cc_shoot_biomass_g+ (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_mbiomass, type = "III")
+setfa_s23_mbiomass <- glmmTMB(setfa_mortality ~ cc_shoot_biomass_g + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_mbiomass, type = "III")
+
+#fall year 1
+amapo_f23_mbiomass <- glmmTMB(amapo_mortality ~ cc_shoot_biomass_g_s23 + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_mbiomass, type = "III")
+setfa_f23_mbiomass <- glmmTMB(setfa_mortality ~ cc_shoot_biomass_g_s23 + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_mbiomass, type = "III")
+
+#spring year 2
+amapo_s24_cc <- glmmTMB(amapo_mortality ~ cc_shoot_biomass_g_m2 + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_cc, type = "III")
+#nothing significant here 
+setfa_s24_cc <- glmmTMB(setfa_mortality ~ cc_shoot_biomass_g_m2, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_cc, type = "III")
+
+#fall year 2
+amapo_f24_cc <- glmmTMB(amapo_mortality ~ cc_biomass_spring, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_cc, type = "III")
+#nothing significant here 
+setfa_f24_cc <- glmmTMB(setfa_mortality ~ cc_biomass_spring, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_cc, type = "III")
+summary(setfa_f24_cc)
+#nothing significant here 
+
+```
+Models of weed seed mortality vs. each spp biomass
+```{r}
+#year one spring
+setfa_s23_tritb <- glmmTMB(setfa_mortality ~ trit_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_tritb, type = "III") 
+
+setfa_s23_clovb <- glmmTMB(setfa_mortality ~ clov_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_clovb, type = "III") 
+#SIGNIFICANT
+
+setfa_s23_canb <- glmmTMB(setfa_mortality ~ can_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_canb, type = "III") 
+#almost significant 
+
+setfa_s23_peab<- glmmTMB(setfa_mortality ~ pea_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_peab, type = "III") 
+
+amapo_s23_tritb <- glmmTMB(amapo_mortality ~ trit_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_tritb, type = "III") 
+
+amapo_s23_clovb <- glmmTMB(amapo_mortality ~ clov_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_clovb, type = "III") 
+
+amapo_s23_canb <- glmmTMB(amapo_mortality ~ can_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_canb, type = "III") 
+
+amapo_s23_peab <- glmmTMB(amapo_mortality ~ pea_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_peab, type = "III") 
+
+seed_mort_y1_f23$trit_biomass_g <- seed_mort_y1_s23$trit_biomass_g
+seed_mort_y1_f23$can_biomass_g <- seed_mort_y1_s23$can_biomass_g
+seed_mort_y1_f23$clov_biomass_g <- seed_mort_y1_s23$clov_biomass_g
+seed_mort_y1_f23$pea_biomass_g <- seed_mort_y1_s23$pea_biomass_g
+#year one fall
+setfa_f23_tritb <- glmmTMB(setfa_mortality ~ trit_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_tritb, type = "III") 
+
+setfa_f23_clovb <- glmmTMB(setfa_mortality ~ clov_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_clovb, type = "III") 
+#SIGNIFICANT
+setfa_f23_canb <- glmmTMB(setfa_mortality ~ can_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_canb, type = "III") 
+
+setfa_f23_peab <- glmmTMB(setfa_mortality ~ pea_biomass_g,, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_peab, type = "III") 
+
+amapo_f23_tritb <- glmmTMB(amapo_mortality ~ trit_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_tritb, type = "III") 
+
+amapo_f23_clovb <- glmmTMB(amapo_mortality ~ clov_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_clovb, type = "III") 
+
+amapo_f23_canb <- glmmTMB(amapo_mortality ~ can_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_canb, type = "III") 
+
+amapo_f23_peab <- glmmTMB(amapo_mortality ~ pea_biomass_g, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_peab, type = "III") 
+
+#compfunc (only canola biomass since everything else died)
+mort_m1 <- glmmTMB(weed_seed_mortality ~ can_biomass_g_m2, family = beta_family(), na.action = na.omit, data = winter_year2_plot)
+glmmTMB:::Anova.glmmTMB(mort_m1, type = "III")
+summary(mort_m1)
+
+mort_m1b <- glmmTMB(weed_seed_mortality ~ can_biomass_g_m2 + (1|block), family = beta_family(), na.action = na.omit, data = winter_year2_plot)
+glmmTMB:::Anova.glmmTMB(mort_m1, type = "III")
+AICc(mort_m1, mort_m1b) #without block is a better model 
+```
+
+COMPFUNC graph (canola biomass vs. S. faberi mortality)
+```{r}
+setfa_s25_df<-as.data.frame(predict_response(mort_m1, terms = c("can_biomass_g_m2 [all]")))
+setfa_s25_df<-setfa_s25_df %>% dplyr::rename(mort.pred =predicted)
+setfa_s25_df<-setfa_s25_df %>% dplyr::rename(can_biomass_g_m2=x)
+setfa_s25_df<-merge(setfa_s25_df, winter_year2_plot, by=c("can_biomass_g_m2"), all=TRUE)
+ggplot(data = setfa_s25_df, aes(x = can_biomass_g_m2, y = weed_seed_mortality)) +
+  ylim(0,1)+
+  geom_line(setfa_s25_df, mapping=aes(x= can_biomass_g_m2, y= mort.pred), color="black", group = 1 ) +
+  geom_ribbon(setfa_s25_df, mapping=aes(ymin=conf.low, ymax=conf.high), alpha=.2, fill = "grey35")+
+  geom_point() + 
+  labs(x = "Canola biomass (g/m2)", 
+       y = "S. faberi seed mortality") +
+  theme_classic()
+```
+
+Models of weed seed mortality vs. each species biomass proportion
+```{r}
+#year one spring
+setfa_s23_tritprop <- glmmTMB(setfa_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_tritprop, type = "III") 
+
+setfa_s23_clovprop <- glmmTMB(setfa_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_clovprop, type = "III") 
+#SIGNIFICANT
+
+setfa_s23_canprop <- glmmTMB(setfa_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_canprop, type = "III") 
+#almost significant 
+
+setfa_s23_peaprop <- glmmTMB(setfa_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(setfa_s23_peaprop, type = "III") 
+
+amapo_s23_tritprop <- glmmTMB(amapo_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_tritprop, type = "III") 
+
+amapo_s23_clovprop <- glmmTMB(amapo_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_clovprop, type = "III") 
+
+amapo_s23_canprop <- glmmTMB(amapo_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_canprop, type = "III") 
+
+amapo_s23_peaprop <- glmmTMB(amapo_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(amapo_s23_peaprop, type = "III") 
+
+#year one fall
+setfa_f23_tritprop <- glmmTMB(setfa_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_tritprop, type = "III") 
+
+setfa_f23_clovprop <- glmmTMB(setfa_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_clovprop, type = "III") 
+#SIGNIFICANT
+
+setfa_f23_canprop <- glmmTMB(setfa_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_canprop, type = "III") 
+
+setfa_f23_peaprop <- glmmTMB(setfa_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(setfa_f23_peaprop, type = "III") 
+
+amapo_f23_tritprop <- glmmTMB(amapo_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_tritprop, type = "III") 
+
+amapo_f23_clovprop <- glmmTMB(amapo_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_clovprop, type = "III") 
+
+amapo_f23_canprop <- glmmTMB(amapo_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_canprop, type = "III") 
+
+amapo_f23_peaprop <- glmmTMB(amapo_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(amapo_f23_peaprop, type = "III") 
+
+#year two spring
+setfa_s24_tritprop <- glmmTMB(setfa_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_tritprop, type = "III") 
+
+setfa_s24_clovprop <- glmmTMB(setfa_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_clovprop, type = "III") 
+
+setfa_s24_canprop <- glmmTMB(setfa_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_canprop, type = "III") 
+
+setfa_s24_peaprop <- glmmTMB(setfa_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(setfa_s24_peaprop, type = "III") 
+
+amapo_s24_tritprop <- glmmTMB(amapo_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_tritprop, type = "III") 
+
+amapo_s24_clovprop <- glmmTMB(amapo_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_clovprop, type = "III") 
+
+amapo_s24_canprop <- glmmTMB(amapo_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_canprop, type = "III") 
+
+amapo_s24_peaprop <- glmmTMB(amapo_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(amapo_s24_peaprop, type = "III") 
+
+#year two fall
+setfa_f24_tritprop <- glmmTMB(setfa_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_tritprop, type = "III") 
+
+setfa_f24_clovprop <- glmmTMB(setfa_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_clovprop, type = "III") 
+
+setfa_f24_canprop <- glmmTMB(setfa_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_canprop, type = "III") 
+
+setfa_f24_peaprop <- glmmTMB(setfa_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(setfa_f24_peaprop, type = "III") 
+
+amapo_f24_tritprop <- glmmTMB(amapo_mortality ~ p_tri, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_tritprop, type = "III") 
+
+amapo_f24_clovprop <- glmmTMB(amapo_mortality ~ p_clov, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_clovprop, type = "III") 
+
+amapo_f24_canprop <- glmmTMB(amapo_mortality ~ p_can, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_canprop, type = "III") 
+
+amapo_f24_peaprop <- glmmTMB(amapo_mortality ~ p_pea, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(amapo_f24_peaprop, type = "III") 
+```
+
+Adding environmental data to the dataframes 
+```{r}
+#adding fall GWC and N to spring data frames 
+seed_mort_y1_s23$f22_gwc_9_29 <- seed_mort_y1_f22$f22_gwc_9_29
+seed_mort_y1_s23$f22_n <- seed_mort_y1_f22$f22_n_mg_kg 
+seed_mort_y2_s24$f23_gwc_10_3 <- seed_mort_y2_f23$f23_gwc_10_3
+seed_mort_y2_s24$f23_n <- seed_mort_y2_f23$f23_mgN_kg
+
+#calcuating AUCs for GWC and N, year one
+s23_gwc_time <- c(0,25,50) #days of sampling
+s23_gwc <- seed_mort_y1_s23[, c("s23_gwc_3_20", "s23_gwc_4_14", "s23_gwc_5_9")]
+s23_gwc$auc <- with(s23_gwc,
+               (25 - 0) * (s23_gwc_3_20 + s23_gwc_4_14) / 2 +
+                 (50 - 25) * (s23_gwc_4_14 + s23_gwc_5_9) / 2
+)
+
+#ok doing the same to N
+s23_n <- seed_mort_y1_s23[, c("s23_n_mg_kg_3_20", "s23_n_mg_kg_4_14", "s23_n_mg_kg_5_9")]
+s23_n$auc <- with(s23_n,
+                    (25 - 0) * (s23_n_mg_kg_3_20 + s23_n_mg_kg_4_14) / 2 +
+                      (50 - 25) * (s23_n_mg_kg_4_14 + s23_n_mg_kg_5_9) / 2
+)
+s23_no3 <- seed_mort_y1_s23[, c("s23_no3_3_20", "s23_no3_4_14", "s23_no3_5_9")]
+s23_no3$auc <- with(s23_no3,
+                  (25 - 0) * (s23_no3_3_20 + s23_no3_4_14) / 2 +
+                    (50 - 25) * (s23_no3_4_14 + s23_no3_5_9) / 2
+)
+s23_nh4 <- seed_mort_y1_s23[, c("s23_nh4_3_20", "s23_nh4_4_14", "s23_nh4_5_9")]
+s23_nh4$auc <- with(s23_nh4,
+                  (25 - 0) * (s23_nh4_3_20 + s23_nh4_4_14) / 2 +
+                    (50 - 25) * (s23_nh4_4_14 + s23_nh4_5_9) / 2
+)
+
+
+#for the fall, we have four time points
+days <- c(0,14,30,41) #days apart from each sampling event
+f23_gwc <- seed_mort_y1_f23[, c("f23_gwc_6_6", "f23_gwc_6_20", "f23_gwc_7_6", "f23_gwc_7_17")]
+f23_gwc$auc <- apply(f23_gwc, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f23_n <- seed_mort_y1_f23[, c("f23_n_mg_kg_6_6", "f23_n_mg_kg_6_20", "f23_n_mg_kg_7_6", "f23_n_mg_kg_7_17")]
+f23_n$auc_n <- apply(f23_n, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f23_no3 <- seed_mort_y1_f23[, c("f23_no3_6_6", "f23_no3_6_20", "f23_no3_7_6", "f23_no3_7_17")]
+f23_no3$auc_no3 <- apply(f23_no3, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f23_nh4 <- seed_mort_y1_f23[, c("f23_nh4_6_6", "f23_nh4_6_20", "f23_nh4_7_6", "f23_nh4_7_17")]
+f23_nh4$auc_nh4 <- apply(f23_nh4, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+
+#now we need to add the auc_s23_gwc and the auc_f23_gwc to the correct data frames 
+seed_mort_y1_s23$auc_gwc_s23 <- s23_gwc$auc 
+seed_mort_y1_f23$auc_gwc_f23 <- f23_gwc$auc
+seed_mort_y1_f23$auc_gwc_s23 <- s23_gwc$auc
+
+seed_mort_y1_s23$auc_n_s23 <- s23_n$auc 
+seed_mort_y1_s23$auc_no3_s23 <- s23_no3$auc
+seed_mort_y1_s23$auc_nh4_s23 <- s23_nh4$auc
+seed_mort_y1_f23$auc_n_s23 <- s23_n$auc
+seed_mort_y1_f23$auc_no3_s23 <- s23_no3$auc
+seed_mort_y1_f23$auc_nh4_s23 <- s23_nh4$auc
+seed_mort_y1_f23$auc_n_f23 <- f23_n$auc_n
+seed_mort_y1_f23$auc_no3_f23 <- f23_no3$auc_no3
+seed_mort_y1_f23$auc_nh4_f23 <- f23_nh4$auc_nh4
+
+#year two 
+days <- c(0,56) #days apart from each sampling event
+s24_gwc <- seed_mort_y2_s24[, c("s24_gwc_3_25", "s24_gwc_5_20")]
+s24_gwc$auc <- apply(s24_gwc, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+s24_n <- seed_mort_y2_s24[, c("s24_mgN_kg_3_25", "s24_mgN_kg_5_20")]
+s24_n$auc_n <- apply(s24_gwc, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+s24_nh4 <- seed_mort_y2_s24[, c("s24_nh4_3_25", "s24_nh4_5_20")]
+s24_nh4$auc_nh4 <- apply(s24_gwc, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+s24_no3 <- seed_mort_y2_s24[, c("s24_no3_3_25", "s24_no3_5_20")]
+s24_no3$auc_no3 <- apply(s24_gwc, 1, function(y) {
+  sum(diff(days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+#fall
+fall_days <- c(0, 15, 29)
+f24_gwc <- seed_mort_y2_f24[, c("f24_gwc_6_12", "f24_gwc_6_27", "f24_gwc_7_11")]
+f24_gwc$auc <- apply(f24_gwc, 1, function(y) {
+  sum(diff(fall_days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f24_n <- seed_mort_y2_f24[, c("f24_mgN_kg_6_12", "f24_mgN_kg_6_27", "f24_mgN_kg_7_11")]
+f24_n$auc_n <- apply(f24_n, 1, function(y) {
+  sum(diff(fall_days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f24_nh4 <- seed_mort_y2_f24[, c("f24_nh4_6_12", "f24_nh4_6_27", "f24_nh4_7_11")]
+f24_nh4$auc_nh4 <- apply(f24_nh4, 1, function(y) {
+  sum(diff(fall_days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+f24_no3 <- seed_mort_y2_f24[, c("f24_no3_6_12", "f24_no3_6_27", "f24_no3_7_11")]
+f24_no3$auc_no3 <- apply(f24_no3, 1, function(y) {
+  sum(diff(fall_days) * (head(y, -1) + tail(y, -1)) / 2)
+})
+
+#now we need to add the AUCs to the data frame 
+seed_mort_y2_s24$auc_gwc_s24 <- s24_gwc$auc
+seed_mort_y2_f24$auc_gwc_f24 <- f24_gwc$auc
+
+seed_mort_y2_s24$auc_n_s24 <- s24_n$auc_n
+seed_mort_y2_f24$auc_n_f24 <- f24_n$auc_n
+seed_mort_y2_s24$auc_nh4_s24 <- s24_nh4$auc_nh4
+seed_mort_y2_f24$auc_nh4_f24 <- f24_nh4$auc_nh4
+seed_mort_y2_s24$auc_no3_s24 <- s24_no3$auc_no3
+seed_mort_y2_f24$auc_no3_f24 <- f24_no3$auc_no3
+```
+
+ENVIRONMENTAL DATA 
+multivariate models by season (using dredge function)
+```{r}
+#AMAPO SPRING YEAR ONE
+form <- amapo_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + f22_gwc_9_29 + auc_gwc_s23 + f22_n + auc_n_s23 
+vars <- all.vars(form)
+seed_mort_y1_s23.na <- seed_mort_y1_s23[complete.cases(seed_mort_y1_s23[, vars]), ]
+big_amapo_s23 <- glmmTMB(amapo_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + f22_gwc_9_29 + auc_gwc_s23 + f22_n + auc_n_s23, family = beta_family(), na.action = na.fail, data = seed_mort_y1_s23.na)
+check_collinearity(big_amapo_s23)
+#some evidence of collinearity against CEC and CA but < 5, so acceptable to use in models
+#View(dredge(big_amapo_s23))
+
+new_s23_amapo <- glmmTMB(amapo_mortality ~ f22_gwc_9_29 + (1|block), family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(new_s23_amapo, type = "III")
+summary(new_s23_amapo)
+performance(new_s23_amapo)
+
+#AMAPO FALL YEAR ONE
+form2 <- amapo_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f23 + auc_gwc_s23 + auc_n_s23 + auc_n_f23 
+vars2 <- all.vars(form2)
+seed_mort_y1_f23.na <- seed_mort_y1_f23[complete.cases(seed_mort_y1_f23[, vars2]), ]
+big_amapo_f23 <- glmmTMB(amapo_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f23 + auc_gwc_s23 + auc_n_s23 + auc_n_f23, family = beta_family(), na.action = na.fail, data = seed_mort_y1_f23.na)
+check_collinearity(big_amapo_f23)
+#View(dredge(big_amapo_f23))
+
+#oh so maybe there is more collinearity than i thought but all < 5
+#CA, CEC, GWC in fall, GWC in spring
+
+new_f23_amapo <- glmmTMB(amapo_mortality ~ silt, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(new_f23_amapo, type = "III")
+summary(new_f23_amapo)
+performance(new_f23_amapo)
+
+
+#SETFA SPRING YEAR ONE
+form3 <- setfa_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + f22_gwc_9_29 + auc_gwc_s23 + f22_n + auc_n_s23 
+vars3 <- all.vars(form3)
+seed_mort_y1_s23.na <- seed_mort_y1_s23[complete.cases(seed_mort_y1_s23[, vars3]), ]
+big_setfa_s23 <- glmmTMB(setfa_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + f22_gwc_9_29 + auc_gwc_s23 + f22_n + auc_n_s23, family = beta_family(), na.action = na.fail, data = seed_mort_y1_s23.na)
+#View(dredge(big_setfa_s23))
+check_collinearity(big_setfa_s23)
+#Ca and CEC
+
+new_s23_setfa <- glmmTMB(setfa_mortality ~ auc_gwc_s23 + f22_n + ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_s23)
+glmmTMB:::Anova.glmmTMB(new_s23_setfa, type = "III")
+summary(new_s23_setfa)
+performance(new_s23_setfa)
+
+#SETFA FALL YEAR ONE 
+form4 <- setfa_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f23 + auc_gwc_s23 + auc_n_s23 + auc_n_f23 
+vars4 <- all.vars(form4)
+seed_mort_y1_f23.na <- seed_mort_y1_f23[complete.cases(seed_mort_y1_f23[, vars4]), ]
+big_setfa_f23 <- glmmTMB(setfa_mortality ~ silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f23 + auc_gwc_s23 + auc_n_s23 + auc_n_f23, family = beta_family(), na.action = na.fail, data = seed_mort_y1_f23.na)
+check_collinearity(big_setfa_f23)
+#View(dredge(big_setfa_f23))
+new_f23_setfa <- glmmTMB(setfa_mortality ~ k_ppm + auc_n_f23 + ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(new_f23_setfa, type = "III")
+summary(new_f23_setfa)
+performance(new_f23_setfa)
+
+#check model assumptions YEAR ONE
+output_setfa_s23 <- simulateResiduals(fittedModel = new_s23_setfa)
+plot(output_setfa_s23)
+testDispersion(output_setfa_s23)
+output_amapo_s23 <- simulateResiduals(fittedModel = new_s23_amapo)
+plot(output_amapo_s23)
+testDispersion(output_amapo_s23)
+output_setfa_f23 <- simulateResiduals(fittedModel = new_f23_setfa)
+plot(output_setfa_f23)
+testDispersion(output_setfa_f23) 
+output_amapo_f23 <- simulateResiduals(fittedModel = new_f23_amapo)
+plot(output_amapo_f23)
+testDispersion(output_amapo_f23)
+
+#YEAR TWO 
+#amapo spring
+seed_mort_y2_s24[4, "auc_gwc_s24"] <- NA #removing outlier
+form5 <- amapo_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + f23_gwc_10_3 + auc_gwc_s24 + f23_n + auc_n_s24 
+vars5 <- all.vars(form5)
+seed_mort_y2_s24.na <- seed_mort_y2_s24[complete.cases(seed_mort_y2_s24[, vars5]), ]
+big_amapo_s24 <- glmmTMB(amapo_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + f23_gwc_10_3 + auc_gwc_s24 + f23_n + auc_n_s24, family = beta_family(), na.action = na.fail, data = seed_mort_y2_s24.na)
+#View(dredge(big_amapo_s24))
+new_amapo_s24 <- glmmTMB(amapo_mortality ~ ca_ppm + cec, family = beta_family(), na.action = na.omit, REML = TRUE, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(new_amapo_s24, type = "III")
+summary(new_amapo_s24)
+performance(new_amapo_s24)
+
+#amapo fall
+form6 <- amapo_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f24 + auc_n_f24 
+vars6 <- all.vars(form6)
+seed_mort_y2_f24.na <- seed_mort_y2_f24[complete.cases(seed_mort_y2_f24[, vars6]), ]
+big_amapo_f24 <- glmmTMB(amapo_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f24 + auc_n_f24, family = beta_family(), na.action = na.fail, data = seed_mort_y2_f24.na)
+#View(dredge(big_amapo_f24))
+new_amapo_f24 <- glmmTMB(amapo_mortality ~ clay + cec, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(new_amapo_f24, type = "III")
+summary(new_amapo_f24)
+performance(new_amapo_f24)
+
+#setfa spring
+form7 <- setfa_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + f23_gwc_10_3 + auc_gwc_s24 + f23_n + auc_n_s24 
+vars7 <- all.vars(form7)
+seed_mort_y2_s24.na <- seed_mort_y2_s24[complete.cases(seed_mort_y2_s24[, vars7]), ]
+big_setfa_s24 <- glmmTMB(setfa_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + f23_gwc_10_3 + auc_gwc_s24 + f23_n + auc_n_s24, family = beta_family(), na.action = na.fail, data = seed_mort_y2_s24.na)
+#View(dredge(big_setfa_s24))
+new_setfa_s24 <- glmmTMB(setfa_mortality ~ clay, family = beta_family(), na.action = na.omit, data = seed_mort_y2_s24)
+glmmTMB:::Anova.glmmTMB(new_setfa_s24, type = "III")
+summary(new_setfa_s24)
+performance(new_setfa_s24)
+
+#setfa fall 
+form8 <- setfa_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f24 + auc_n_f24 
+vars8 <- all.vars(form8)
+seed_mort_y2_f24.na <- seed_mort_y2_f24[complete.cases(seed_mort_y2_f24[, vars8]), ]
+big_setfa_f24 <- glmmTMB(setfa_mortality ~ clay + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f24 + auc_n_f24, family = beta_family(), na.action = na.fail, data = seed_mort_y2_f24.na)
+#View(dredge(big_setfa_f24))
+new_setfa_f24 <- glmmTMB(setfa_mortality ~ mg_ppm + ca_ppm + clay, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(new_setfa_f24, type = "III")
+summary(new_setfa_f24)
+performance(new_setfa_f24)
+
+#check year two assumptions 
+output_setfa_s24 <- simulateResiduals(fittedModel = new_setfa_s24)
+plot(output_setfa_s24)
+testDispersion(output_setfa_s24)
+output_amapo_s24 <- simulateResiduals(fittedModel = new_amapo_s24)
+plot(output_amapo_s24)
+testDispersion(output_amapo_s24)
+output_setfa_f24 <- simulateResiduals(fittedModel = new_setfa_f24)
+plot(output_setfa_f24)
+testDispersion(output_setfa_f24) 
+output_amapo_f24 <- simulateResiduals(fittedModel = new_amapo_f24)
+plot(output_amapo_f24)
+testDispersion(output_amapo_f24)
+```
+
+Make spring data from both years into a dataframe, with gwc and n having the same name 
+```{r}
+seed_mort_y1_s23$spring_gwc <- seed_mort_y1_s23$auc_gwc_s23
+seed_mort_y2_s24$spring_gwc <- seed_mort_y2_s24$auc_gwc_s24
+seed_mort_y1_s23$burial_gwc <- seed_mort_y1_s23$f22_gwc_9_29
+seed_mort_y2_s24$burial_gwc <- seed_mort_y2_s24$f23_gwc_10_3
+seed_mort_y1_s23$spring_n <- seed_mort_y1_s23$auc_n_s23
+seed_mort_y2_s24$spring_n <- seed_mort_y2_s24$auc_n_s24
+seed_mort_y1_s23$burial_n <- seed_mort_y1_s23$f22_n
+seed_mort_y2_s24$burial_n <- seed_mort_y2_s24$f23_n
+seed_mort_spring2 <- bind_rows(seed_mort_y1_s23, seed_mort_y2_s24)
+```
+
+univariate models for spring mortality with year interaction 
+```{r}
+#what variables are we going to use? 
+#clay (or silt) + k_ppm + mg_ppm + ca_ppm + cec + burial_gwc + spring_gwc + burial_n + spring_n
+#AMAPO
+spring_amapo_clay <- glmmTMB(amapo_mortality ~ clay*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_clay, type = "III")
+#summary(spring_amapo_clay)
+spring_amapo_clay2 <- glmmTMB(amapo_mortality ~ clay + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_clay2, type = "III")
+summary(spring_amapo_clay2)
+
+spring_amapo_silt <- glmmTMB(amapo_mortality ~ silt*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_silt, type = "III")
+#summary(spring_amapo_silt)
+spring_amapo_silt2 <- glmmTMB(amapo_mortality ~ silt + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+AICc(spring_amapo_silt, spring_amapo_silt2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_silt2, type = "III")
+summary(spring_amapo_silt2)
+
+spring_amapo_k <- glmmTMB(amapo_mortality ~ k_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_k, type = "III")
+#summary(spring_amapo_k)
+spring_amapo_k2 <- glmmTMB(amapo_mortality ~ k_ppm + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_k2, type = "III")
+summary(spring_amapo_k2)
+AICc(spring_amapo_k, spring_amapo_k2)
+
+spring_amapo_ca <- glmmTMB(amapo_mortality ~ ca_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_ca, type = "III")
+#summary(spring_amapo_ca)
+spring_amapo_ca2 <- glmmTMB(amapo_mortality ~ ca_ppm + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_ca2, type = "III")
+summary(spring_amapo_ca2)
+AICc(spring_amapo_ca,spring_amapo_ca2)
+
+spring_amapo_mg <- glmmTMB(amapo_mortality ~ mg_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_mg, type = "III")
+#summary(spring_amapo_mg)
+spring_amapo_mg2 <- glmmTMB(amapo_mortality ~ mg_ppm + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_mg2, type = "III")
+summary(spring_amapo_mg2)
+AICc(spring_amapo_mg, spring_amapo_mg2)
+
+spring_amapo_cec <- glmmTMB(amapo_mortality ~ cec*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_cec, type = "III")
+summary(spring_amapo_cec)
+#significant interaction 
+spring_amapo_cec2 <- glmmTMB(amapo_mortality ~ cec+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_cec2, type = "III")
+#summary(spring_amapo_cec2)
+AICc(spring_amapo_cec, spring_amapo_cec2)
+
+#EMTRENDS
+mt <- emtrends(spring_amapo_cec, ~ season, var = "cec")
+mt
+
+spring_amapo_bgwc <- glmmTMB(amapo_mortality ~ burial_gwc*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_bgwc, type = "III")
+#summary(spring_amapo_bgwc)
+spring_amapo_bgwc2 <- glmmTMB(amapo_mortality ~ burial_gwc + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_bgwc2, type = "III")
+summary(spring_amapo_bgwc2)
+AICc(spring_amapo_bgwc, spring_amapo_bgwc2)
+
+spring_amapo_bn <- glmmTMB(amapo_mortality ~ burial_n*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_bn, type = "III")
+#summary(spring_amapo_bn)
+spring_amapo_bn2 <- glmmTMB(amapo_mortality ~ burial_n + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_bn2, type = "III")
+summary(spring_amapo_bn2)
+AICc(spring_amapo_bn, spring_amapo_bn2)
+
+spring_amapo_sgwc <- glmmTMB(amapo_mortality ~ spring_gwc*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_sgwc, type = "III")
+#summary(spring_amapo_sgwc)
+spring_amapo_sgwc2 <- glmmTMB(amapo_mortality ~ spring_gwc + season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_sgwc2, type = "III")
+summary(spring_amapo_sgwc2)
+AICc(spring_amapo_sgwc, spring_amapo_sgwc2)
+
+spring_amapo_sn <- glmmTMB(amapo_mortality ~ spring_n*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_amapo_sn, type = "III")
+#summary(spring_amapo_sn)
+spring_amapo_sn2 <- glmmTMB(amapo_mortality ~ spring_n+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_amapo_sn2, type = "III")
+summary(spring_amapo_sn2)
+AICc(spring_amapo_sn, spring_amapo_sn2)
+
+#SETFA
+spring_setfa_clay <- glmmTMB(setfa_mortality ~ clay*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_clay, type = "III")
+#summary(spring_setfa_clay)
+spring_setfa_clay2 <- glmmTMB(setfa_mortality ~ clay+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_clay2, type = "III")
+summary(spring_setfa_clay2)
+AICc(spring_setfa_clay, spring_setfa_clay2)
+
+spring_setfa_silt <- glmmTMB(setfa_mortality ~ silt*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_silt, type = "III")
+#summary(spring_setfa_silt)
+spring_setfa_silt2 <- glmmTMB(setfa_mortality ~ silt+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_silt2, type = "III")
+summary(spring_setfa_silt2)
+AICc(spring_setfa_silt, spring_setfa_silt2)
+
+spring_setfa_k <- glmmTMB(setfa_mortality ~ k_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_k, type = "III")
+#summary(spring_setfa_k)
+spring_setfa_k2 <- glmmTMB(setfa_mortality ~ k_ppm+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_k2, type = "III")
+summary(spring_setfa_k2)
+AICc(spring_setfa_k, spring_setfa_k2)
+
+spring_setfa_ca <- glmmTMB(setfa_mortality ~ ca_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_ca, type = "III")
+#summary(spring_setfa_ca)
+spring_setfa_ca2 <- glmmTMB(setfa_mortality ~ ca_ppm+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_ca2, type = "III")
+summary(spring_setfa_ca2)
+AICc(spring_setfa_ca, spring_setfa_ca2)
+
+spring_setfa_mg <- glmmTMB(setfa_mortality ~ mg_ppm*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_mg, type = "III")
+#summary(spring_setfa_mg)
+spring_setfa_mg2 <- glmmTMB(setfa_mortality ~ mg_ppm+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_mg2, type = "III")
+summary(spring_setfa_mg2)
+AICc(spring_setfa_mg, spring_setfa_mg2)
+
+spring_setfa_cec <- glmmTMB(setfa_mortality ~ cec*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_cec, type = "III")
+summary(spring_setfa_cec)
+spring_setfa_cec2 <- glmmTMB(setfa_mortality ~ cec+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_cec2, type = "III")
+#summary(spring_setfa_cec2)
+#AICc(spring_setfa_cec, spring_setfa_cec2)
+
+spring_setfa_bgwc <- glmmTMB(setfa_mortality ~ burial_gwc*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_bgwc, type = "III")
+#summary(spring_setfa_bgwc)
+spring_setfa_bgwc2 <- glmmTMB(setfa_mortality ~ burial_gwc+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_bgwc2, type = "III")
+summary(spring_setfa_bgwc2)
+AICc(spring_setfa_bgwc, spring_setfa_bgwc2)
+
+spring_setfa_bn <- glmmTMB(setfa_mortality ~ burial_n*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_bn, type = "III")
+summary(spring_setfa_bn)
+spring_setfa_bn2 <- glmmTMB(setfa_mortality ~ burial_n+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_bn2, type = "III")
+#summary(spring_setfa_bn2)
+AICc(spring_setfa_bn, spring_setfa_bn2)
+
+spring_setfa_sgwc <- glmmTMB(setfa_mortality ~ spring_gwc*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_sgwc, type = "III")
+#summary(spring_setfa_sgwc)
+spring_setfa_sgwc2 <- glmmTMB(setfa_mortality ~ spring_gwc+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_sgwc2, type = "III")
+summary(spring_setfa_sgwc2)
+AICc(spring_setfa_sgwc, spring_setfa_sgwc2)
+
+spring_setfa_sn <- glmmTMB(setfa_mortality ~ spring_n*season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+#glmmTMB:::Anova.glmmTMB(spring_setfa_sn, type = "III")
+#summary(spring_setfa_sn)
+spring_setfa_sn2 <- glmmTMB(setfa_mortality ~ spring_n+season, family = beta_family(), na.action = na.omit, data = seed_mort_spring2)
+glmmTMB:::Anova.glmmTMB(spring_setfa_sn2, type = "III")
+summary(spring_setfa_sn2)
+AICc(spring_setfa_sn, spring_setfa_sn2)
+```
+univariate models for fall 
+```{r}
+#variables for year one: clay + silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f23 + auc_gwc_s23 + auc_n_s23 + auc_n_f23
+#variables for year two: clay + silt + k_ppm + mg_ppm + ca_ppm + cec + auc_gwc_f24 + auc_n_f24 
+
+#year one amapo
+f23_amapo_clay <- glmmTMB(amapo_mortality ~ clay, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_clay, type = "III")
+summary(f23_amapo_clay)
+
+f23_amapo_silt <- glmmTMB(amapo_mortality ~ silt, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_silt, type = "III")
+summary(f23_amapo_silt)
+#significant
+
+f23_amapo_k <- glmmTMB(amapo_mortality ~ k_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_k, type = "III")
+summary(f23_amapo_k)
+
+f23_amapo_ca <- glmmTMB(amapo_mortality ~ ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_ca, type = "III")
+summary(f23_amapo_ca)
+#significant
+
+f23_amapo_mg <- glmmTMB(amapo_mortality ~ mg_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_mg, type = "III")
+summary(f23_amapo_mg)
+#significant 
+
+f23_amapo_cec <- glmmTMB(amapo_mortality ~ cec, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_cec, type = "III")
+summary(f23_amapo_cec)
+
+f23_amapo_fgwc <- glmmTMB(amapo_mortality ~ auc_gwc_f23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_fgwc, type = "III")
+summary(f23_amapo_fgwc)
+
+f23_amapo_sgwc <- glmmTMB(amapo_mortality ~ auc_gwc_s23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_sgwc, type = "III")
+summary(f23_amapo_sgwc)
+
+f23_amapo_sn <- glmmTMB(amapo_mortality ~ auc_n_s23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_sn, type = "III")
+summary(f23_amapo_sn)
+
+f23_amapo_fn <- glmmTMB(amapo_mortality ~ auc_n_f23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_amapo_fn, type = "III")
+summary(f23_amapo_fn)
+
+#year one setfa
+f23_setfa_clay <- glmmTMB(setfa_mortality ~ clay, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_clay, type = "III")
+summary(f23_setfa_clay)
+
+f23_setfa_silt <- glmmTMB(setfa_mortality ~ silt, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_silt, type = "III")
+summary(f23_setfa_silt)
+
+f23_setfa_k <- glmmTMB(setfa_mortality ~ k_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_k, type = "III")
+summary(f23_setfa_k)
+#significant
+
+f23_setfa_ca <- glmmTMB(setfa_mortality ~ ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_ca, type = "III")
+summary(f23_setfa_ca)
+
+f23_setfa_mg <- glmmTMB(setfa_mortality ~ mg_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_mg, type = "III")
+summary(f23_setfa_mg)
+
+f23_setfa_cec <- glmmTMB(setfa_mortality ~ cec, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_cec, type = "III")
+summary(f23_setfa_cec)
+
+f23_setfa_fgwc <- glmmTMB(setfa_mortality ~ auc_gwc_f23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_fgwc, type = "III")
+summary(f23_setfa_fgwc)
+
+f23_setfa_sgwc <- glmmTMB(setfa_mortality ~ auc_gwc_s23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_sgwc, type = "III")
+summary(f23_setfa_sgwc)
+
+f23_setfa_sn <- glmmTMB(setfa_mortality ~ auc_n_s23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_sn, type = "III")
+summary(f23_setfa_sn)
+
+f23_setfa_fn <- glmmTMB(setfa_mortality ~ auc_n_f23, family = beta_family(), na.action = na.omit, data = seed_mort_y1_f23)
+glmmTMB:::Anova.glmmTMB(f23_setfa_fn, type = "III")
+summary(f23_setfa_fn)
+
+#year two amapo
+f24_amapo_clay <- glmmTMB(amapo_mortality ~ clay, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_clay, type = "III")
+summary(f24_amapo_clay)
+#significant
+
+f24_amapo_silt <- glmmTMB(amapo_mortality ~ silt, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_silt, type = "III")
+summary(f24_amapo_silt)
+
+f24_amapo_k <- glmmTMB(amapo_mortality ~ k_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_k, type = "III")
+summary(f24_amapo_k)
+
+f24_amapo_ca <- glmmTMB(amapo_mortality ~ ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_ca, type = "III")
+summary(f24_amapo_ca)
+
+f24_amapo_mg <- glmmTMB(amapo_mortality ~ mg_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_mg, type = "III")
+summary(f24_amapo_mg)
+
+f24_amapo_cec <- glmmTMB(amapo_mortality ~ cec, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_cec, type = "III")
+summary(f24_amapo_cec)
+#significant
+
+f24_amapo_fgwc <- glmmTMB(amapo_mortality ~ auc_gwc_f24, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_fgwc, type = "III")
+summary(f24_amapo_fgwc)
+
+f24_amapo_fn <- glmmTMB(amapo_mortality ~ auc_n_f24, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_amapo_fn, type = "III")
+summary(f24_amapo_fn)
+
+#year two setfa
+f24_setfa_clay <- glmmTMB(setfa_mortality ~ clay, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_clay, type = "III")
+summary(f24_setfa_clay)
+#significant
+
+f24_setfa_silt <- glmmTMB(setfa_mortality ~ silt, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_silt, type = "III")
+summary(f24_setfa_silt)
+#significant
+
+f24_setfa_k <- glmmTMB(setfa_mortality ~ k_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_k, type = "III")
+summary(f24_setfa_k)
+
+f24_setfa_ca <- glmmTMB(setfa_mortality ~ ca_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_ca, type = "III")
+summary(f24_setfa_ca)
+#significant
+
+f24_setfa_mg <- glmmTMB(setfa_mortality ~ mg_ppm, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_mg, type = "III")
+summary(f24_setfa_mg)
+#significant 
+
+f24_setfa_cec <- glmmTMB(setfa_mortality ~ cec, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_cec, type = "III")
+summary(f24_setfa_cec)
+
+f24_setfa_fgwc <- glmmTMB(setfa_mortality ~ auc_gwc_f24, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_fgwc, type = "III")
+summary(f24_setfa_fgwc)
+
+f24_setfa_fn <- glmmTMB(setfa_mortality ~ auc_n_f24, family = beta_family(), na.action = na.omit, data = seed_mort_y2_f24)
+glmmTMB:::Anova.glmmTMB(f24_setfa_fn, type = "III")
+summary(f24_setfa_fn)
+```
+ 
+Creating 16S phyloseq object 
+```{r}
+library(phyloseq)
+library(Biostrings)
+#make ASV table
+asv_table_16s <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/16s/feature-table.tsv",
+                        header = TRUE,
+                        sep = "\t",
+                        row.names = 1,
+                        comment.char = "",
+                        skip = 1,#skip first line (info ab variables that we don't need)
+                        check.names = FALSE)
+colnames(asv_table_16s)[1] <- "FeatureID"
+
+
+#convert to matrix
+asv_matrix_16s <- as.matrix(asv_table_16s)
+rep_seqs_16s <- readDNAStringSet("/Users/mayahofmann/Desktop/data_files_seed_mort/16s/rep-seqs.fasta")
+names(rep_seqs_16s) <- names(rep_seqs_16s)
+
+tax_16s <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/16s/taxonomy.tsv",
+                  header = TRUE,
+                  sep = "\t",
+                  row.names = 1,
+                  quote = "",
+                  comment.char = "",
+                  check.names = FALSE)
+
+tax_split_16s <- strsplit(as.character(tax_16s$Taxon), ";")
+
+tax_mat_16s <- do.call(rbind, lapply(tax_split_16s, function(x) {
+  length(x) <- 7  #7 levels
+  return(x)
+}))
+
+colnames(tax_mat_16s) <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
+rownames(tax_mat_16s) <- rownames(tax_16s)
+otu_16s <- otu_table(asv_matrix_16s, taxa_are_rows = TRUE)
+tax_table_ps_16s <- tax_table(as.matrix(tax_mat_16s))
+
+#add metadata
+metadata_16s <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/16s/sample_metadata.txt", header = TRUE, sep = "\t", row.names = 1, na.strings = "NA")
+ps_16s <- phyloseq(otu_16s, tax_table_ps_16s, sample_data(metadata_16s), refseq(rep_seqs_16s))
+
+#filter out reads that are only in one sapmle and <20 reads
+ps_16s <- prune_taxa(
+  rowSums(otu_table(ps_16s) > 0) >= 2 & taxa_sums(ps_16s) >= 20,
+  ps_16s
+)
+
+#take out contamination from eukaryotes (specifically, mitochondria from chloroplasts)
+#ps <- subset_taxa(ps, Kingdom == " k__Bacteria" | is.na(Phylum))
+ps_16s <- subset_taxa(ps_16s, (Family != " f__Mitochondria") | is.na(Family))
+ntaxa(ps_16s) #1654
+
+#save phyloseq object 
+saveRDS(ps_16s, file = "/Users/mayahofmann/Desktop/data_files_seed_mort/16s/phyloseq_16s.rds")
+```
+
+Creating ITS phyloseq object 
+```{r}
+#make ASV table
+asv_table_its <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/its/feature-table.tsv",
+                        header = TRUE,
+                        sep = "\t",
+                        row.names = 1,
+                        comment.char = "",
+                        skip = 1,#skip first line (info ab variables that we don't need)
+                        check.names = FALSE)
+colnames(asv_table_its)[1] <- "FeatureID"
+
+
+#convert to matrix
+asv_matrix_its <- as.matrix(asv_table_its)
+rep_seqs_its <- readDNAStringSet("/Users/mayahofmann/Desktop/data_files_seed_mort/its/rep-seqs.fasta")
+names(rep_seqs_its) <- names(rep_seqs_its)
+
+tax_its <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/its/taxonomy.tsv",
+                  header = TRUE,
+                  sep = "\t",
+                  row.names = 1,
+                  quote = "",
+                  comment.char = "",
+                  check.names = FALSE)
+
+tax_split_its <- strsplit(as.character(tax_its$Taxon), ";")
+
+tax_mat_its <- do.call(rbind, lapply(tax_split_its, function(x) {
+  length(x) <- 7  #7 levels
+  return(x)
+}))
+
+colnames(tax_mat_its) <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
+rownames(tax_mat_its) <- rownames(tax_its)
+otu_its <- otu_table(asv_matrix_its, taxa_are_rows = TRUE)
+tax_table_ps_its <- tax_table(as.matrix(tax_mat_its))
+
+#add metadata
+metadata_its <- read.table("/Users/mayahofmann/Desktop/data_files_seed_mort/its/sample_metadata.txt", header = TRUE, sep = "\t", row.names = 1, na.strings = "NA")
+ps_its <- phyloseq(otu_its, tax_table_ps_its, sample_data(metadata_its), refseq(rep_seqs_its))
+
+#filter out reads that are only in one sapmle and <20 reads
+ps_its <- prune_taxa(
+  rowSums(otu_table(ps_its) > 0) >= 2 & taxa_sums(ps_its) >= 20,
+  ps_its
+)
+
+ntaxa(ps_its) #361
+
+#save phyloseq object 
+saveRDS(ps_its, file = "/Users/mayahofmann/Desktop/data_files_seed_mort/its/phyloseq_its.rds")
+```
+16S ANALYSES + PLOTS
+```{r}
+ps_16s <- readRDS("/Users/mayahofmann/Desktop/data_files_seed_mort/16s/phyloseq_16s.rds")
+#PLOTS
+ps_16s <- subset_taxa(ps_16s, (Kingdom != "Unassigned"))
+ps_16s <- subset_taxa(ps_16s, (Kingdom != "d__Archaea"))
+```
+rarefaction (16s)
+```{r rarefaction curves, warning=FALSE}
+otu_16s <- as(otu_table(ps_16s), "matrix")
+#see if samples are rows
+if (taxa_are_rows(ps_16s)) {
+  otu_16s <- t(otu_16s)
+}
+
+#make rarefaction curves
+rare_list_16s <- lapply(1:nrow(otu_16s), function(i) {
+  x <- otu_16s[i, ]
+  depths <- seq(1, sum(x), length.out = 50)  #smoother curves
+  
+  richness_16s <- sapply(depths, function(d) {
+    vegan::rarefy(x, sample = d)
+  })
+  
+  data.frame(
+    Sample = rownames(otu_16s)[i],
+    Depth = depths,
+    Richness = richness_16s
+  )
+})
+
+rare_df_16s <- bind_rows(rare_list_16s)
+
+#add metadata
+meta_16s <- data.frame(sample_data(ps_16s))
+meta_16s$Sample <- rownames(meta_16s)
+rare_df_16s <- left_join(rare_df_16s, meta_16s, by = "Sample")
+
+#make plot
+rarefaction_16s <- ggplot(rare_df_16s, aes(x = Depth, y = Richness, group = Sample)) +
+  geom_line(alpha = 0.7, linewidth = 0.8) +
+  theme_classic(base_size = 20) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  labs(
+    x = "Sequencing Depth",
+    y = "Observed ASVs") +
+  scale_x_continuous(n.breaks = 6) +
+  theme(
+    panel.grid = element_blank()
+  )
+
+ggsave("16s_rarefaction.png", plot = rarefaction_16s, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+rarefying (16s)
+```{r rarefying to minimum}
+#rarefy
+#find lowest sample size 
+sample.size_16s = min(sample_sums(ps_16s)) #73325
+sample.size_16s
+
+set.seed(123)
+ps_16s <- rarefy_even_depth(ps_16s, sample.size_16s,
+                              rngseed = 123,
+                              replace = TRUE,
+                              trimOTUs = TRUE,
+                              verbose = TRUE)
+```
+alpha diversity (16s)
+```{r}
+ps_filtered_16s <- subset_samples(ps_16s, trt != "baseline")
+alpha_div_16s <- estimate_richness(ps_filtered_16s, measures = c("Observed", "Shannon", "Simpson"))
+
+#add sample IDs to alpha div dataframe  
+alpha_div_16s$SampleID <- rownames(alpha_div_16s)
+alpha_div_16s <- merge(alpha_div_16s, data.frame(sample_data(ps_filtered_16s)), 
+                   by.x = "SampleID", by.y = "row.names")
+
+#reformat for ggplot
+alpha_long_16s <- alpha_div_16s %>%
+  pivot_longer(cols = c("Observed", "Shannon", "Simpson"),
+               names_to = "Metric",
+               values_to = "Value")
+               
+#get mean + std error for bar chart
+alpha_summary_16s <- alpha_long_16s %>%
+  group_by(season, trt, Metric) %>%
+  summarise(
+    mean = mean(Value),
+    se = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+
+#new graphs for alpha div 
+obs_dat_16s <- filter(alpha_long_16s, Metric == "Observed")
+shan_dat_16s <- filter(alpha_long_16s, Metric == "Shannon")
+simp_dat_16s <- filter(alpha_long_16s, Metric == "Simpson")
+
+my_theme <- theme_classic(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 14)
+  )
+
+p_obs_16s <- ggplot(obs_dat_16s, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1, show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Observed richness",
+    fill = "Treatment")+ 
+  my_theme
+p_obs_16s
+p_shan_16s <- ggplot(shan_dat_16s, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1,show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Shannon diversity",
+    fill = "Treatment")+ 
+  my_theme
+p_shan_16s
+
+p_simp_16s <- ggplot(simp_dat_16s, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1,show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Simpson diversity",
+    fill = "Treatment")+ 
+  my_theme
+p_simp_16s
+
+library(patchwork)
+combined_plot_16s <- (p_obs_16s | p_shan_16s | p_simp_16s) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+combined_plot_16s
+
+ggsave("16s_alpha_div.png", plot = combined_plot_16s, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+taxonomic bar plots (16s)
+```{r taxonomic bar plots}
+#TAXONOMIC BAR PLOTS
+ps_glom_16s <- tax_glom(ps_filtered_16s, taxrank = "Family") #can change for any taxonomic group
+ps_rel_16s <- transform_sample_counts(ps_glom_16s, function(x) x / sum(x))
+sample_sums(ps_rel_16s)
+top_taxa_16s <- names(sort(taxa_sums(ps_rel_16s), decreasing = TRUE))[1:10]
+ps_top_16s <- prune_taxa(top_taxa_16s, ps_rel_16s)
+ps_top_16s <- transform_sample_counts(ps_top_16s, function(x) x / sum(x))
+df_16s <- psmelt(ps_top_16s)
+#replace NA
+df_16s$Family[is.na(df_16s$Family)] <- "Unknown"
+find("recode")
+library(dplyr)
+
+df_16s <- df_16s %>%
+  mutate(phase = dplyr::recode(season,"S23" = "growth","F23" = "decomposition"),
+    phase = factor(phase,
+                          levels = c("growth", "decomposition")),
+    x_label = paste(trt, phase)
+  ) %>%
+  arrange(phase, trt, Sample)
+
+df_16s$Sample <- factor(df_16s$Sample, levels = unique(df_16s$Sample))
+label_vec_16s <- setNames(df_16s$x_label, df_16s$Sample)
+
+family_taxa_16s <- ggplot(df_16s, aes(x = Sample, y = Abundance, fill = Family)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set3") +
+  scale_x_discrete(labels = label_vec_16s) +
+  theme_classic() +
+  labs(
+    y = "Relative Abundance",
+    x = NULL
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+family_taxa_16s
+  
+ggsave("16S_taxa_family.png", plot = family_taxa_16s, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+beta diversity + plots (16s)
+```{r beta diversity}
+#BETA DIV
+bray_dist_16s <- phyloseq::distance(ps_16s, method = "bray")
+pcoa_res_16s <- ordinate(ps_16s, method = "PCoA", distance = bray_dist_16s)
+
+#plot by treatment and szn
+pcoa_plot_16s <- plot_ordination(ps_16s, pcoa_res_16s, type = "samples", color = "season", shape= "trt") +
+  geom_point(size = 4, alpha = 0.8) +
+  theme_classic(base_size = 14) +
+  theme(axis.title = element_text(size = 16),
+        axis.text  = element_text(size = 14)) +
+  labs(color = "Treatment") +
+  scale_color_brewer(palette = "Set2",
+                     labels = c("Baseline",
+                                "CC decomposition",
+                                "CC growth"))
+
+eig_16s <- pcoa_res_16s$values$Eigenvalues
+var_exp_16s <- eig_16s / sum(eig_16s)
+
+pcoa_plot_16s <- pcoa_plot_16s +
+  labs(
+    x = paste0("PCoA1 (", round(100 * var_exp_16s[1], 1), "%)"),
+    y = paste0("PCoA2 (", round(100 * var_exp_16s[2], 1), "%)")
+  )
+
+pcoa_plot_16s <- pcoa_plot_16s + 
+  stat_ellipse(aes(group = season), type = "t", level = 0.95)
+
+ggsave("16s_pcoa.png", plot = pcoa_plot_16s,
+       width = 10, height = 6, dpi = 300)
+```
+dbRDA (16s)
+```{r distance based rda}
+#DISTANCE BASED RDA
+otu_mat_16s <- as(otu_table(ps_filtered_16s), "matrix")
+if(taxa_are_rows(ps_filtered_16s)) {
+  otu_mat_16s <- t(otu_mat_16s)
+}
+
+meta_16s <- data.frame(sample_data(ps_filtered_16s))
+
+#isolate numeric environmental variables
+library(dplyr)
+env_vars_16s <- meta_16s %>%
+  dplyr::select(sand, silt, clay, k_ppm, ca_ppm, mg_ppm, cec, burial_moisture, incubation_moisture, burial_n, incubation_n)
+
+bray_dist_16s <- vegdist(otu_mat_16s, method = "bray")
+
+
+dbrda_res_16s <- capscale(bray_dist_16s ~ ., data = env_vars_16s)
+anova(dbrda_res_16s, permutations = 999)
+anova(dbrda_res_16s, by = "terms", permutations = 999)
+
+#PLOTTING
+library(ggrepel)
+site_scores_16s <- as.data.frame(scores(dbrda_res_16s, display = "sites"))
+env_scores_16s <- as.data.frame(scores(dbrda_res_16s, display = "bp"))
+site_scores_16s <- cbind(site_scores_16s, meta_16s)
+
+colnames(meta_16s)
+site_scores_16s$season <- as.factor(site_scores_16s$season)
+site_scores_16s$trt <- as.factor(site_scores_16s$trt)
+
+env_scores_16s <- as.data.frame(env_scores_16s)
+env_scores_16s$CAP1 <- as.numeric(env_scores_16s$CAP1)
+env_scores_16s$CAP2 <- as.numeric(env_scores_16s$CAP2)
+str(env_scores_16s)
+
+eig_16s <- dbrda_res_16s$CCA$eig
+var_exp_16s <- eig_16s / sum(eig_16s)
+cap1_16s <- round(100 * var_exp_16s[1], 1)
+cap2_16s <- round(100 * var_exp_16s[2], 1)
+
+dbRDA_plot_16s <- ggplot(site_scores_16s, aes(x = CAP1, y = CAP2, color = season, shape = trt)) +
+  geom_point(size = 4, alpha = 0.8) +
+  geom_segment(data = env_scores_16s,
+               aes(x = 0, y = 0, xend = CAP1, yend = CAP2),
+               inherit.aes = FALSE,
+               arrow = arrow(length = unit(0.3,"cm")), color = "black") +
+  geom_text_repel(data = env_scores_16s,
+                  aes(x = CAP1, y = CAP2, label = rownames(env_scores_16s)),
+                  inherit.aes = FALSE,
+                  size = 5) +
+  scale_color_brewer(palette = "Set2") + 
+  scale_color_discrete(
+    name = "Cover crop phase",
+    labels = c("Decomposition", "Growth")
+  ) +
+  scale_shape_discrete(
+    name = "Treatment",
+    labels = c("Canola", "Fallow")
+  ) +
+  theme_classic(base_size = 20) +
+  theme(
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    axis.text.x  = element_text(size = 18),
+    axis.text.y  = element_text(size = 18)
+  ) +
+  labs(
+    x = paste0("CAP1 (", cap1_16s, "%)"),
+    y = paste0("CAP2 (", cap2_16s, "%)") , color = "Cover crop phase", shape = "Treatment")
+
+ggsave("16s_dbrda.png", plot = dbRDA_plot_16s, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+
+#clay and N collinear, so one is excluded
+```
+16s statistical analyses
+```{r statistics}
+#STATISTICS 
+ps_alpha_16s <- subset_samples(ps_16s, trt != "baseline")
+ps_alpha_16s <- prune_taxa(taxa_sums(ps_alpha_16s) > 0, ps_alpha_16s)
+
+#recalculate alpha diversity
+alpha_df_16s <- estimate_richness(ps_alpha_16s, measures = c("Observed", "Shannon", "Simpson"))
+meta_alpha_16s <- data.frame(sample_data(ps_alpha_16s))
+alpha_df_16s <- cbind(alpha_df_16s, meta_alpha_16s)
+
+#make into factors
+alpha_df_16s$trt <- as.factor(alpha_df_16s$trt)
+alpha_df_16s$season <- as.factor(alpha_df_16s$season)
+library(glmmTMB)
+
+shannon_model_16s <- glmmTMB(Shannon ~ trt * season + (1|block), 
+                         data = alpha_df_16s, 
+                         family = gaussian())
+glmmTMB:::Anova.glmmTMB(shannon_model_16s, type = "III")
+
+
+
+richness_model_16s <- glmmTMB(Observed ~ trt * season + (1|block),
+                          data = alpha_df_16s,
+                          family = nbinom2())
+glmmTMB:::Anova.glmmTMB(richness_model_16s, type = "III")
+                          
+simpson_model_16s <- glmmTMB(Simpson ~ trt * season + (1|block),
+                          data = alpha_df_16s,
+                          family = nbinom2())
+
+glmmTMB:::Anova.glmmTMB(simpson_model_16s, type = "III")
+summary(shannon_model_16s)
+library(emmeans)
+emmeans_shannon_16s <- emmeans(shannon_model_16s, ~ season)
+emmeans_shannon_16s
+
+summary(richness_model_16s)
+emmeans_richness_16s <- emmeans(richness_model_16s, ~ season)
+emmeans_richness_16s
+
+library(ggpubr)
+div_16s_mort <- ggplot(data = alpha_df_16s, aes(x = Shannon, y = setfa_mortality)) +
+  ylim(0,1)+
+  geom_point() + 
+  geom_smooth(method = "lm", color = "black") +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y = 1) +
+  labs(x = "Bacterial Shannon diversity", 
+       y = "S. faberi seed mortality") +
+  theme_classic(base_size = 20) +
+  theme(
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    axis.text.x  = element_text(size = 18),
+    axis.text.y  = element_text(size = 18)
+  )
+
+ggsave("div_16s_mort.png", plot = div_16s_mort, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+
+#stats on beta
+ps_beta_16s <- subset_samples(ps_16s, trt != "baseline")
+ps_beta_16s <- prune_taxa(taxa_sums(ps_beta_16s) > 0, ps_beta_16s)
+
+otu_mat_16s <- as(otu_table(ps_beta_16s), "matrix")
+if(taxa_are_rows(ps_beta_16s)) {
+  otu_mat_16s <- t(otu_mat_16s)  # samples as rows
+}
+
+meta_16s <- data.frame(sample_data(ps_beta_16s))
+
+bray_dist_16s <- vegdist(otu_mat_16s, method = "bray")
+
+set.seed(123)
+permanova_res_16s <- adonis2(bray_dist_16s ~ season, data = meta_16s, permutations = 999)
+permanova_res_16s
+#groups centroids different 
+
+betadisp_season_16s <- betadisper(bray_dist_16s, meta_16s$season)
+anova(betadisp_season_16s)
+#dispersion NOT different
+```
+ITS analyses and plots 
+```{r}
+ps_its <- readRDS("/Users/mayahofmann/Desktop/data_files_seed_mort/its/phyloseq_its.rds")
+```
+rarefaction (its)
+```{r rarefaction curves, warning=FALSE}
+otu_its <- as(otu_table(ps_its), "matrix")
+#see if samples are rows
+if (taxa_are_rows(ps_its)) {
+  otu_its <- t(otu_its)
+}
+
+#make rarefaction curves
+rare_list_its <- lapply(1:nrow(otu_its), function(i) {
+  x <- otu_its[i, ]
+  depths <- seq(1, sum(x), length.out = 50)  #smoother curves
+  
+  richness_its <- sapply(depths, function(d) {
+    vegan::rarefy(x, sample = d)
+  })
+  
+  data.frame(
+    Sample = rownames(otu_its)[i],
+    Depth = depths,
+    Richness = richness_its
+  )
+})
+
+rare_df_its <- bind_rows(rare_list_its)
+
+#add metadata
+meta_its <- data.frame(sample_data(ps_its))
+meta_its$Sample <- rownames(meta_its)
+rare_df_its <- left_join(rare_df_its, meta_its, by = "Sample")
+
+#make plot
+rarefaction_its <- ggplot(rare_df_its, aes(x = Depth, y = Richness, group = Sample)) +
+  geom_line(alpha = 0.7, linewidth = 0.8) +
+  theme_classic(base_size = 20) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  labs(
+    x = "Sequencing Depth",
+    y = "Observed ASVs") +
+  scale_x_continuous(n.breaks = 6) +
+  theme(
+    panel.grid = element_blank()
+  )
+
+ggsave("its_rarefaction.png", plot = rarefaction_its, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+rarefying (its)
+```{r rarefying to minimum}
+#rarefy
+#find lowest sample size 
+sample.size_its = min(sample_sums(ps_its)) #93141
+sample.size_its
+
+set.seed(123)
+ps_its <- rarefy_even_depth(ps_its, sample.size_its,
+                              rngseed = 123,
+                              replace = TRUE,
+                              trimOTUs = TRUE,
+                              verbose = TRUE)
+```
+alpha diversity (its)
+```{r}
+ps_filtered_its <- subset_samples(ps_its, trt != "baseline")
+alpha_div_its <- estimate_richness(ps_filtered_its, measures = c("Observed", "Shannon", "Simpson"))
+
+#add sample IDs to alpha div dataframe  
+alpha_div_its$SampleID <- rownames(alpha_div_its)
+alpha_div_its <- merge(alpha_div_its, data.frame(sample_data(ps_filtered_its)), 
+                   by.x = "SampleID", by.y = "row.names")
+
+#reformat for ggplot
+alpha_long_its <- alpha_div_its %>%
+  pivot_longer(cols = c("Observed", "Shannon", "Simpson"),
+               names_to = "Metric",
+               values_to = "Value")
+               
+#get mean + std error for bar chart
+alpha_summary_its <- alpha_long_its %>%
+  group_by(season, trt, Metric) %>%
+  summarise(
+    mean = mean(Value),
+    se = sd(Value) / sqrt(n()),
+    .groups = "drop"
+  )
+
+#new graphs for alpha div 
+obs_dat_its <- filter(alpha_long_its, Metric == "Observed")
+shan_dat_its <- filter(alpha_long_its, Metric == "Shannon")
+simp_dat_its <- filter(alpha_long_its, Metric == "Simpson")
+
+p_obs_its <- ggplot(obs_dat_its, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1, show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Observed richness",
+    fill = "Treatment")+ 
+  my_theme
+p_obs_its
+p_shan_its <- ggplot(shan_dat_its, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1,show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Shannon diversity",
+    fill = "Treatment")+ 
+  my_theme
+p_shan_its
+
+p_simp_its <- ggplot(simp_dat_its, aes(x = season, y = Value, fill = trt)) +
+  stat_summary(fun = mean,geom = "bar", position = position_dodge(width = 0.8))+
+  stat_summary(fun.data = mean_se, geom = "errorbar",position = position_dodge(width = 0.8),width = 0.2) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), color = "black",alpha = 1,size = 1,show.legend = FALSE) +
+  scale_x_discrete(limits = c("S23", "F23"), labels = c("growth", "decomposition")) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = "Cover crop phase",
+    y = "Simpson diversity",
+    fill = "Treatment")+ 
+  my_theme
+p_simp_its
+
+library(patchwork)
+combined_plot_its <- (p_obs_its | p_shan_its | p_simp_its) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+combined_plot_its
+
+ggsave("its_alpha_div.png", plot = combined_plot_its, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+taxonomic bar plots (its) NOT WORKING AT THE MOMENT BUT MAYBE WILL EVENTUALLY??
+```{r taxonomic bar plots}
+#TAXONOMIC BAR PLOTS
+ps_glom_its <- tax_glom(ps_filtered_its, taxrank = "Family") #can change for any taxonomic group
+ps_rel_its <- transform_sample_counts(ps_glom_its, function(x) x / sum(x))
+sample_sums(ps_rel_its)
+top_taxa_its <- names(sort(taxa_sums(ps_rel_its), decreasing = TRUE))[1:10]
+ps_top_its <- prune_taxa(top_taxa_its, ps_rel_its)
+ps_top_its <- transform_sample_counts(ps_top_its, function(x) x / sum(x))
+df_its <- psmelt(ps_top_its)
+#replace NA
+df_its$Family[is.na(df_its$Family)] <- "Unknown"
+df_its <- df_its %>%
+  mutate(phase = dplyr::recode(season,"S23" = "growth","F23" = "decomposition"),
+    phase = factor(phase,
+                          levels = c("growth", "decomposition")),
+    x_label = paste(trt, phase)
+  ) %>%
+  arrange(phase, trt, Sample)
+
+df_its$Sample <- factor(df_its$Sample, levels = unique(df_its$Sample))
+label_vec_its <- setNames(df_its$x_label, df_its$Sample)
+
+family_taxa_its <- ggplot(df_its, aes(x = Sample, y = Abundance, fill = Family)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set3") +
+  scale_x_discrete(labels = label_vec_its) +
+  theme_classic() +
+  labs(
+    y = "Relative Abundance",
+    x = NULL
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+family_taxa_its
+  
+ggsave("its_taxa_family.png", plot = family_taxa_its, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+beta diversity + plots (its)
+```{r beta diversity}
+#BETA DIV
+bray_dist_its <- phyloseq::distance(ps_its, method = "bray")
+pcoa_res_its <- ordinate(ps_its, method = "PCoA", distance = bray_dist_its)
+
+#plot by treatment and szn
+pcoa_plot_its <- plot_ordination(ps_its, pcoa_res_its, type = "samples", color = "season", shape= "trt") +
+  geom_point(size = 4, alpha = 0.8) +
+  theme_classic(base_size = 14) +
+  theme(axis.title = element_text(size = 16),
+        axis.text  = element_text(size = 14)) +
+  labs(color = "Treatment") +
+  scale_color_brewer(palette = "Set2",
+                     labels = c("Baseline",
+                                "CC decomposition",
+                                "CC growth"))
+
+eig_its <- pcoa_res_its$values$Eigenvalues
+var_exp_its <- eig_its / sum(eig_its)
+
+pcoa_plot_its <- pcoa_plot_its +
+  labs(
+    x = paste0("PCoA1 (", round(100 * var_exp_its[1], 1), "%)"),
+    y = paste0("PCoA2 (", round(100 * var_exp_its[2], 1), "%)")
+  )
+
+pcoa_plot_its <- pcoa_plot_its + 
+  stat_ellipse(aes(group = season), type = "t", level = 0.95)
+
+ggsave("its_pcoa.png", plot = pcoa_plot_its, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+```
+dbRDA (its)
+```{r distance based rda}
+#DISTANCE BASED RDA
+otu_mat_its <- as(otu_table(ps_filtered_its), "matrix")
+if(taxa_are_rows(ps_filtered_its)) {
+  otu_mat_its <- t(otu_mat_its)
+}
+
+meta_its <- data.frame(sample_data(ps_filtered_its))
+
+#isolate numeric environmental variables
+library(dplyr)
+env_vars_its <- meta_its %>%
+  dplyr::select(sand, silt, clay, k_ppm, ca_ppm, mg_ppm, cec, burial_moisture, incubation_moisture, burial_n, incubation_n)
+
+bray_dist_its <- vegdist(otu_mat_its, method = "bray")
+
+
+dbrda_res_its <- capscale(bray_dist_its ~ ., data = env_vars_its)
+anova(dbrda_res_its, permutations = 999)
+anova(dbrda_res_its, by = "terms", permutations = 999)
+
+#PLOTTING
+library(ggrepel)
+site_scores_its <- as.data.frame(scores(dbrda_res_its, display = "sites"))
+env_scores_its <- as.data.frame(scores(dbrda_res_its, display = "bp"))
+site_scores_its <- cbind(site_scores_its, meta_its)
+
+colnames(meta_its)
+site_scores_its$season <- as.factor(site_scores_its$season)
+site_scores_its$trt <- as.factor(site_scores_its$trt)
+
+env_scores_its <- as.data.frame(env_scores_its)
+env_scores_its$CAP1 <- as.numeric(env_scores_its$CAP1)
+env_scores_its$CAP2 <- as.numeric(env_scores_its$CAP2)
+str(env_scores_its)
+
+eig_its <- dbrda_res_its$CCA$eig
+var_exp_its <- eig_its / sum(eig_its)
+cap1_its <- round(100 * var_exp_its[1], 1)
+cap2_its <- round(100 * var_exp_its[2], 1)
+
+dbRDA_plot_its <- ggplot(site_scores_its, aes(x = CAP1, y = CAP2, color = season, shape = trt)) +
+  geom_point(size = 4, alpha = 0.8) +
+  geom_segment(data = env_scores_its,
+               aes(x = 0, y = 0, xend = CAP1, yend = CAP2),
+               inherit.aes = FALSE,
+               arrow = arrow(length = unit(0.3,"cm")), color = "black") +
+  geom_text_repel(data = env_scores_its,
+                  aes(x = CAP1, y = CAP2, label = rownames(env_scores_its)),
+                  inherit.aes = FALSE,
+                  size = 5) +
+  scale_color_brewer(palette = "Set2") + 
+  scale_color_discrete(
+    name = "Cover crop phase",
+    labels = c("Decomposition", "Growth")
+  ) +
+  scale_shape_discrete(
+    name = "Treatment",
+    labels = c("Canola", "Fallow")
+  ) +
+  theme_classic(base_size = 20) +
+  theme(
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    axis.text.x  = element_text(size = 18),
+    axis.text.y  = element_text(size = 18)
+  ) +
+  labs(
+    x = paste0("CAP1 (", cap1_16s, "%)"),
+    y = paste0("CAP2 (", cap2_16s, "%)") , color = "Cover crop phase", shape = "Treatment")
+
+ggsave("its_dbrda.png", plot = dbRDA_plot_its, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+
+#clay and n at burial collinear
+```
+its statistical analyses
+```{r statistics}
+#STATISTICS 
+ps_alpha_its <- subset_samples(ps_its, trt != "baseline")
+ps_alpha_its <- prune_taxa(taxa_sums(ps_alpha_its) > 0, ps_alpha_its)
+
+#recalculate alpha diversity
+alpha_df_its <- estimate_richness(ps_alpha_its, measures = c("Observed", "Shannon", "Simpson"))
+meta_alpha_its <- data.frame(sample_data(ps_alpha_its))
+alpha_df_its <- cbind(alpha_df_its, meta_alpha_its)
+
+#make into factors
+alpha_df_its$trt <- as.factor(alpha_df_its$trt)
+alpha_df_its$season <- as.factor(alpha_df_its$season)
+library(glmmTMB)
+
+shannon_model_its <- glmmTMB(Shannon ~ trt * season + (1|block), 
+                         data = alpha_df_its, 
+                         family = gaussian())
+glmmTMB:::Anova.glmmTMB(shannon_model_its, type = "III")
+
+richness_model_its <- glmmTMB(Observed ~ trt * season + (1|block),
+                          data = alpha_df_its,
+                          family = nbinom2())
+glmmTMB:::Anova.glmmTMB(richness_model_its, type = "III")
+                          
+simpson_model_its <- glmmTMB(Simpson ~ trt * season + (1|block),
+                          data = alpha_df_its,
+                          family = nbinom2())
+
+glmmTMB:::Anova.glmmTMB(simpson_model_its, type = "III")
+summary(shannon_model_its)
+library(emmeans)
+emmeans_shannon_its <- emmeans(shannon_model_its, ~ season)
+emmeans_shannon_its
+
+summary(richness_model_its)
+emmeans_richness_its <- emmeans(richness_model_its, ~ season)
+emmeans_richness_its
+
+library(ggpubr)
+div_its_mort <- ggplot(data = alpha_df_its, aes(x = Shannon, y = setfa_mortality)) +
+  ylim(0,1)+
+  geom_point() + 
+  geom_smooth(method = "lm", color = "black") +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), label.y = 1) +
+  labs(x = "Bacterial Shannon diversity", 
+       y = "S. faberi seed mortality") +
+  theme_classic(base_size = 20) +
+  theme(
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    axis.text.x  = element_text(size = 18),
+    axis.text.y  = element_text(size = 18)
+  )
+
+ggsave("div_its_mort.png", plot = div_its_mort, path = "/Users/mayahofmann/Desktop/data_files_seed_mort",
+       width = 10, height = 6, dpi = 300)
+
+#stats on beta
+ps_beta_its <- subset_samples(ps_its, trt != "baseline")
+ps_beta_its <- prune_taxa(taxa_sums(ps_beta_its) > 0, ps_beta_its)
+
+otu_mat_its <- as(otu_table(ps_beta_its), "matrix")
+if(taxa_are_rows(ps_beta_its)) {
+  otu_mat_its <- t(otu_mat_its)  # samples as rows
+}
+
+meta_its <- data.frame(sample_data(ps_beta_its))
+
+bray_dist_its <- vegdist(otu_mat_its, method = "bray")
+
+set.seed(123)
+permanova_res_its <- adonis2(bray_dist_its ~ season, data = meta_its, permutations = 999)
+permanova_res_its
+#groups centroids different 
+
+betadisp_season_its <- betadisper(bray_dist_its, meta_its$season)
+anova(betadisp_season_its)
+#dispersion NOT different
+```
