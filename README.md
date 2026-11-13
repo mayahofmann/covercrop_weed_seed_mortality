@@ -1,13 +1,13 @@
 # covercrop_weed_seed_mortality
 Relevant data files, metadata, and R code for weed seed mortality in CCC (2022-2023, 2023-2024) + COMPFUNC (2024-2025). 
 
-ccc_seed_mortality_22_23.csv: data file for year 1 of experiment 1 (2022-2023)
+ccc_seed_mortality_22_23.csv: data file for year 1 of experiment 1 (2022-2023) - cover crop diversity experiment
 
-ccc_seed_mortality_23_24.csv: data file for year 2 of experiment 1 (2023-2024)
+ccc_seed_mortality_23_24.csv: data file for year 2 of experiment 1 (2023-2024) - cover crop diversity experiment
 
-compfunc_winter_y2_plot.csv: data file for experiment 2 (2024-2025)
+compfunc_winter_y2_plot.csv: data file for experiment 2 (2024-2025) - cover crop species density experiment
 
-metadata_csvfiles.xlsx: has column name and description for the following files - ccc_seed_mortality_22_23.csv, ccc_seed_mortality_23_24.csv, compfunc_winter_y2_plot.csv
+metadata_csvfiles.xlsx: has column names and descriptions of collected data for the following files - ccc_seed_mortality_22_23.csv, ccc_seed_mortality_23_24.csv, compfunc_winter_y2_plot.csv
 
 metadata.tsv: metadata used in QIIME scripts (found in 16s and its folders)
 
