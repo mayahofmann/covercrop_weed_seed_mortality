@@ -1710,6 +1710,9 @@ set.seed(123)
 permanova_res_16s <- adonis2(bray_dist_16s ~ season, data = meta_16s, permutations = 999)
 permanova_res_16s
 #groups centroids different 
+permanova_res_16s_trt <- adonis2(bray_dist_16s ~ trt, data = meta_16s, permutations = 999)
+permanova_res_16s_trt
+#not different 
 
 betadisp_season_16s <- betadisper(bray_dist_16s, meta_16s$season)
 anova(betadisp_season_16s)
@@ -2084,6 +2087,9 @@ set.seed(123)
 permanova_res_its <- adonis2(bray_dist_its ~ season, data = meta_its, permutations = 999)
 permanova_res_its
 #groups centroids different 
+permanova_res_its_trt <- adonis2(bray_dist_its ~ trt, data = meta_its, permutations = 999)
+permanova_res_its_trt
+#not different
 
 betadisp_season_its <- betadisper(bray_dist_its, meta_its$season)
 anova(betadisp_season_its)
